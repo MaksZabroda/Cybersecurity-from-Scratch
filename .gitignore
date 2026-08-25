@@ -1,0 +1,31 @@
+# === Python (lesson8) ===
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+
+# === OpenSSL / crypto lab artifacts (lesson8) ===
+crypto-lab/
+*.pem
+*.key
+*.bin
+*.enc
+message.txt
+decrypted.txt
+message_decrypted.txt
+big.bin
+
+# === Bash demo artifacts (lesson9) ===
+demo.log
+*.log
+
+# === OS / editor junk ===
+.DS_Store
+.idea/
+.vscode/
+*.swp
