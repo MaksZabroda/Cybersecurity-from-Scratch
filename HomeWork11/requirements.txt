@@ -1,0 +1,9 @@
+##### Залежності уроку 11. Встановлення:
+
+# pip install -r requirements.txt
+
+# або (швидше):  uv pip install -r requirements.txt
+
+requests==2.32.3     # HTTP-запити до NVD, KEV, EPSS, OSV
+pandas==2.2.3        # таблиці та аналіз даних (потрібен лише для 06_risk_report.py)
+python-dotenv==1.0.1 # читання .env файлу (необов'язково, але зручно)

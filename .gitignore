@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.env
 *.egg-info/
 .mypy_cache/
 .pytest_cache/
@@ -29,3 +30,7 @@ demo.log
 .idea/
 .vscode/
 *.swp
+
+# === Python homework generated data and secrets ===
+*.csv
+*.json
