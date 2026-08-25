@@ -209,6 +209,9 @@ check_dns() {
 check_internet() {
     # Значення 0 означатиме успішний ping. Починаємо з 1 (перевірка не пройдена).
     local ping_ok=1
+    local internet_ok=1
+    local connection_detail=""
+    local external_ip=""
 
     section "4. Доступ до інтернету"
 
@@ -217,14 +220,14 @@ check_internet() {
     # HTTPS — краща практична перевірка, бо ICMP часто блокує файрвол.
     if have curl && curl --fail --silent --show-error --head \
         --max-time 5 https://example.com/ >/dev/null 2>&1; then
-        status OK "Інтернет доступний" "HTTPS-запит до example.com успішний"
-        return
+        internet_ok=0
+        connection_detail="HTTPS-запит до example.com успішний"
     fi
 
     # Якщо curl відсутній або HTTPS не спрацював, перевіряємо відому IP-адресу
     # Cloudflare. Параметр -W має різні одиниці: мілісекунди в macOS і секунди
     # в Linux, тому команди для платформ розділені.
-    if have ping; then
+    if (( internet_ok != 0 )) && have ping; then
         if [[ "$PLATFORM" == "macos" ]]; then
             if ping -c 1 -W 3000 1.1.1.1 >/dev/null 2>&1; then
                 ping_ok=0
@@ -235,9 +238,33 @@ check_internet() {
     fi
 
     if (( ping_ok == 0 )); then
-        status OK "Інтернет доступний" "1.1.1.1 відповідає на ping; HTTPS недоступний"
-    else
+        internet_ok=0
+        connection_detail="1.1.1.1 відповідає на ping; HTTPS недоступний"
+    fi
+
+    if (( internet_ok != 0 )); then
         status FAIL "Інтернет недоступний" "не вдалися HTTPS і ping до 1.1.1.1"
+        status FAIL "Зовнішню IP-адресу не визначено" "немає доступу до інтернету"
+        return
+    fi
+
+    status OK "Інтернет доступний" "$connection_detail"
+
+    # Зовнішню адресу не можна дізнатися лише з локальних налаштувань, тому
+    # звертаємося до api64.ipify.org. Сервіс повертає IPv4 або IPv6 простим
+    # текстом. Тайм-аут не дозволяє цій додатковій перевірці затримати звіт.
+    if ! have curl; then
+        status FAIL "Зовнішню IP-адресу не визначено" "команда curl не встановлена"
+        return
+    fi
+
+    external_ip=$(curl --fail --silent --max-time 5 \
+        https://api64.ipify.org 2>/dev/null || true)
+
+    if [[ -n "$external_ip" ]]; then
+        status OK "Зовнішню IP-адресу визначено" "$external_ip"
+    else
+        status FAIL "Зовнішню IP-адресу не визначено" "сервіс api64.ipify.org недоступний"
     fi
 }
 
