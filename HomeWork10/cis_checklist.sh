@@ -36,6 +36,8 @@ if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
     GREEN=$'\033[32m'
     YELLOW=$'\033[33m'
     BLUE=$'\033[34m'
+    # Колір 208 із 256-кольорової ANSI-палітри — помаранчевий.
+    ORANGE=$'\033[38;5;208m'
     BOLD=$'\033[1m'
     RESET=$'\033[0m'
 else
@@ -43,6 +45,7 @@ else
     GREEN=""
     YELLOW=""
     BLUE=""
+    ORANGE=""
     BOLD=""
     RESET=""
 fi
@@ -51,8 +54,30 @@ pass_count=0
 fail_count=0
 skip_count=0
 
+# Назви й статуси зберігаються парами з однаковими індексами. Це дає змогу
+# повторно показати всі результати одним списком у фінальному підсумку.
+check_statuses=()
+check_labels=()
+
 have() {
     command -v "$1" >/dev/null 2>&1
+}
+
+print_recommendation() {
+    local recommendation="$1"
+    local line
+    local command
+
+    printf '         %sРекомендація:%s\n' "$YELLOW" "$RESET"
+    while IFS= read -r line; do
+        # Рядки з префіксом CMD: оформлюємо як окремі команди.
+        if [[ "$line" == CMD:* ]]; then
+            command="${line#CMD: }"
+            printf '           %s$ %s%s\n' "$ORANGE" "$command" "$RESET"
+        else
+            printf '           %s\n' "$line"
+        fi
+    done <<< "$recommendation"
 }
 
 result() {
@@ -81,6 +106,9 @@ result() {
             ;;
     esac
 
+    check_statuses+=("$state")
+    check_labels+=("$label")
+
     printf '  %s[%s]%s %s' "$color" "$state" "$RESET" "$label"
     if [[ -n "$detail" ]]; then
         printf ' — %s' "$detail"
@@ -89,8 +117,7 @@ result() {
 
     # Рекомендацію показуємо лише для пунктів, які потребують уваги.
     if [[ "$state" != "PASS" && -n "$recommendation" ]]; then
-        printf '         %sРекомендація:%s %s\n' \
-            "$YELLOW" "$RESET" "$recommendation"
+        print_recommendation "$recommendation"
     fi
 }
 
@@ -128,16 +155,33 @@ detect_platform() {
 password_recommendation() {
     case "$PLATFORM" in
         macos)
-            printf '%s' 'Задайте мінімум 8 символів через MDM/configuration profile; перевірте чинну політику через pwpolicy.'
+            printf '%s\n' \
+                'Задайте мінімум 8 символів через MDM/configuration profile.' \
+                'Перевірити чинну локальну політику:' \
+                'CMD: pwpolicy -getglobalpolicy'
             ;;
         wsl)
-            printf '%s' 'У WSL встановіть libpam-pwquality і задайте minlen = 8 у /etc/security/pwquality.conf; пароль Windows налаштовується окремо.'
+            printf '%s\n' \
+                'Установіть libpam-pwquality всередині WSL:' \
+                'CMD: sudo apt update' \
+                'CMD: sudo apt install libpam-pwquality' \
+                'Відкрийте /etc/security/pwquality.conf і задайте minlen = 8.' \
+                'Пароль облікового запису Windows налаштовується окремо.'
             ;;
         *)
             if have apt-get; then
-                printf '%s' 'Встановіть libpam-pwquality та задайте minlen = 8 у /etc/security/pwquality.conf.'
+                printf '%s\n' \
+                    'Установіть і налаштуйте libpam-pwquality:' \
+                    'CMD: sudo apt update' \
+                    'CMD: sudo apt install libpam-pwquality' \
+                    'CMD: sudoedit /etc/security/pwquality.conf' \
+                    'У конфігурації задайте minlen = 8 або більше.'
             elif have dnf; then
-                printf '%s' 'Встановіть libpwquality та задайте minlen = 8 у /etc/security/pwquality.conf.'
+                printf '%s\n' \
+                    'Установіть і налаштуйте libpwquality:' \
+                    'CMD: sudo dnf install libpwquality' \
+                    'CMD: sudoedit /etc/security/pwquality.conf' \
+                    'У конфігурації задайте minlen = 8 або більше.'
             else
                 printf '%s' 'Налаштуйте PAM/libpwquality і явно задайте minlen не менше 8.'
             fi
@@ -151,10 +195,45 @@ firewall_recommendation() {
             printf '%s' 'Увімкніть System Settings -> Network -> Firewall і повторіть перевірку.'
             ;;
         wsl)
-            printf '%s' 'Перевірте Windows Defender Firewall; за потреби також встановіть та увімкніть UFW усередині WSL.'
+            if have apt-get; then
+                printf '%s\n' \
+                    'Установіть і ввімкніть UFW усередині WSL:' \
+                    'CMD: sudo apt update' \
+                    'CMD: sudo apt install ufw' \
+                    'CMD: sudo ufw enable' \
+                    'Також перевірте Windows Defender Firewall у Windows.'
+            else
+                printf '%s\n' \
+                    'Установіть UFW пакетним менеджером дистрибутива.' \
+                    'CMD: sudo ufw enable' \
+                    'Також перевірте Windows Defender Firewall у Windows.'
+            fi
             ;;
         *)
-            printf '%s' 'Встановіть UFW і ввімкніть його; перед активацією дозвольте SSH, якщо працюєте віддалено.'
+            if have apt-get; then
+                printf '%s\n' \
+                    'Установіть UFW і задайте базові правила:' \
+                    'CMD: sudo apt update' \
+                    'CMD: sudo apt install ufw' \
+                    'CMD: sudo ufw default deny incoming' \
+                    'CMD: sudo ufw default allow outgoing' \
+                    'Якщо потрібен віддалений SSH, дозвольте його ДО активації:' \
+                    'CMD: sudo ufw allow OpenSSH' \
+                    'Після перевірки правил увімкніть фаєрвол:' \
+                    'CMD: sudo ufw enable'
+            elif have dnf; then
+                printf '%s\n' \
+                    'Для Fedora/RHEL типовим є firewalld:' \
+                    'CMD: sudo dnf install firewalld' \
+                    'CMD: sudo systemctl enable --now firewalld' \
+                    'CMD: sudo firewall-cmd --state' \
+                    'Цей спрощений пункт перевіряє UFW, тому firewalld оцініть вручну.'
+            else
+                printf '%s\n' \
+                    'Установіть UFW пакетним менеджером системи.' \
+                    'Перед активацією дозвольте SSH, якщо працюєте віддалено.' \
+                    'CMD: sudo ufw enable'
+            fi
             ;;
     esac
 }
@@ -162,13 +241,25 @@ firewall_recommendation() {
 ssh_recommendation() {
     case "$PLATFORM" in
         macos)
-            printf '%s' 'Задайте PermitRootLogin no, перевірте sudo sshd -t та перезапустіть Remote Login; не закривайте чинну сесію до перевірки входу.'
+            printf '%s\n' \
+                'Задайте PermitRootLogin no у конфігурації SSH.' \
+                'CMD: sudo sshd -t' \
+                'Після успішної перевірки перезапустіть Remote Login.' \
+                'Не закривайте чинну сесію до перевірки нового входу.'
             ;;
         wsl)
-            printf '%s' 'Задайте PermitRootLogin no у конфігурації SSH WSL, виконайте sudo sshd -t і перечитайте конфіг сервісу.'
+            printf '%s\n' \
+                'Задайте PermitRootLogin no у конфігурації SSH WSL.' \
+                'CMD: sudo sshd -t' \
+                'Після успішної перевірки перечитайте конфіг сервісу SSH.'
             ;;
         *)
-            printf '%s' 'Задайте PermitRootLogin no, виконайте sudo sshd -t і лише потім reload сервісу SSH; збережіть чинну сесію відкритою.'
+            printf '%s\n' \
+                'Задайте PermitRootLogin no у конфігурації SSH.' \
+                'CMD: sudo sshd -t' \
+                'Якщо синтаксис правильний:' \
+                'CMD: sudo systemctl reload ssh' \
+                'Не закривайте чинну сесію до перевірки нового входу.'
             ;;
     esac
 }
@@ -179,13 +270,35 @@ updates_recommendation() {
             printf '%s' 'Увімкніть Automatic Updates у System Settings -> General -> Software Update.'
             ;;
         wsl)
-            printf '%s' 'Увімкніть автоматичні оновлення в Linux-дистрибутиві WSL та окремо перевірте Windows Update.'
+            if have apt-get; then
+                printf '%s\n' \
+                    'Увімкніть unattended-upgrades усередині WSL:' \
+                    'CMD: sudo apt update' \
+                    'CMD: sudo apt install unattended-upgrades' \
+                    'CMD: sudo dpkg-reconfigure -plow unattended-upgrades' \
+                    'Окремо перевірте Windows Update.'
+            elif have dnf; then
+                printf '%s\n' \
+                    'Увімкніть dnf-automatic усередині WSL:' \
+                    'CMD: sudo dnf install dnf-automatic' \
+                    'CMD: sudo systemctl enable --now dnf-automatic.timer' \
+                    'Окремо перевірте Windows Update.'
+            else
+                printf '%s' 'Увімкніть штатний механізм автооновлень дистрибутива WSL та окремо перевірте Windows Update.'
+            fi
             ;;
         *)
             if have apt-get; then
-                printf '%s' 'Встановіть unattended-upgrades і виконайте sudo dpkg-reconfigure -plow unattended-upgrades.'
+                printf '%s\n' \
+                    'Установіть і ввімкніть unattended-upgrades:' \
+                    'CMD: sudo apt update' \
+                    'CMD: sudo apt install unattended-upgrades' \
+                    'CMD: sudo dpkg-reconfigure -plow unattended-upgrades'
             elif have dnf; then
-                printf '%s' 'Встановіть dnf-automatic та ввімкніть dnf-automatic.timer.'
+                printf '%s\n' \
+                    'Установіть і ввімкніть dnf-automatic:' \
+                    'CMD: sudo dnf install dnf-automatic' \
+                    'CMD: sudo systemctl enable --now dnf-automatic.timer'
             else
                 printf '%s' 'Увімкніть штатний механізм автоматичного встановлення оновлень безпеки.'
             fi
@@ -196,13 +309,22 @@ updates_recommendation() {
 lockout_recommendation() {
     case "$PLATFORM" in
         macos)
-            printf '%s' 'Задайте максимальну кількість невдалих входів через MDM/configuration profile; перевірте політику через pwpolicy.'
+            printf '%s\n' \
+                'Задайте максимальну кількість невдалих входів через MDM/configuration profile.' \
+                'Перевірити чинну локальну політику:' \
+                'CMD: pwpolicy -getglobalpolicy'
             ;;
         wsl)
-            printf '%s' 'Налаштуйте pam_faillock і deny=N у WSL; політика блокування Windows-акаунта задається окремо.'
+            printf '%s\n' \
+                'Налаштуйте pam_faillock і deny=N усередині WSL:' \
+                'CMD: sudoedit /etc/security/faillock.conf' \
+                'Політика блокування Windows-акаунта задається окремо.'
             ;;
         *)
-            printf '%s' 'Налаштуйте pam_faillock і deny=N у /etc/security/faillock.conf; перед зміною PAM зробіть резервну копію та залиште root-консоль.'
+            printf '%s\n' \
+                'Налаштуйте pam_faillock і deny=N:' \
+                'CMD: sudoedit /etc/security/faillock.conf' \
+                'Перед зміною PAM зробіть резервну копію та залиште root-консоль.'
             ;;
     esac
 }
@@ -634,12 +756,29 @@ check_account_lockout() {
 
 print_summary() {
     local total=$((pass_count + fail_count + skip_count))
+    local i
+    local state
+    local color
 
     section "Підсумок"
     printf '  Перевірок: %s | %sPASS: %s%s | %sFAIL: %s%s | %sSKIP: %s%s\n' \
         "$total" "$GREEN" "$pass_count" "$RESET" "$RED" "$fail_count" \
         "$RESET" "$YELLOW" "$skip_count" "$RESET"
 
+    printf '\n  %sСписок перевірок:%s\n' "$BOLD" "$RESET"
+    for i in "${!check_statuses[@]}"; do
+        state="${check_statuses[$i]}"
+        case "$state" in
+            PASS) color="$GREEN" ;;
+            FAIL) color="$RED" ;;
+            SKIP) color="$YELLOW" ;;
+            *)    color="" ;;
+        esac
+        printf '    %s[%s]%s %s\n' \
+            "$color" "$state" "$RESET" "${check_labels[$i]}"
+    done
+
+    printf '\n'
     if (( fail_count > 0 )); then
         printf '  %sЄ налаштування, які не відповідають checklist.%s\n' "$RED" "$RESET"
     elif (( skip_count > 0 )); then
@@ -648,6 +787,9 @@ print_summary() {
     else
         printf '  %sУсі пункти checklist пройдено.%s\n' "$GREEN" "$RESET"
     fi
+
+    printf '\n  %sПримітка:%s Це не офіційний CIS Benchmark і не замінює повний аудит безпеки.\n' \
+        "$BOLD" "$RESET"
 }
 
 main() {
