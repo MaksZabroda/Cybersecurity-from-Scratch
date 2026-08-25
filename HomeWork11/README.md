@@ -28,7 +28,7 @@ Linux запускаються без `shell=True`. Потім із програ
 ## Запуск
 
 ```bash
-cd /Users/casper/Education/Cybersecurity-from-Scratch/HomeWork11
+cd Cybersecurity-from-Scratch/HomeWork11
 source .venv/bin/activate
 pip install -r requirements.txt
 python homework11.py
