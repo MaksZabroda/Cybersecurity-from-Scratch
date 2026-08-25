@@ -37,6 +37,11 @@ fi
 ok_count=0
 fail_count=0
 
+# У цих масивах зберігаємо результат і назву кожної перевірки. Завдяки цьому
+# наприкінці можна повторно показати не лише кількість, а й повний список.
+check_statuses=()
+check_labels=()
+
 # Перевіряє, чи встановлена команда. Увесь службовий вивід приховується.
 # Приклад: `have curl` повертає успіх, якщо curl доступний через PATH.
 have() {
@@ -54,6 +59,11 @@ status() {
     local state="$1"
     local label="$2"
     local detail="${3:-}"
+
+    # Індекс в обох масивах однаковий: статус із check_statuses відповідає
+    # назві перевірки з check_labels.
+    check_statuses+=("$state")
+    check_labels+=("$label")
 
     if [[ "$state" == "OK" ]]; then
         ok_count=$((ok_count + 1))
@@ -312,11 +322,22 @@ check_ports() {
 print_summary() {
     # Загальна кількість має дорівнювати сумі успішних і невдалих перевірок.
     local total=$((ok_count + fail_count))
+    local i
 
     section "Підсумок"
     printf '  Перевірок: %s | %sOK: %s%s | %sFAIL: %s%s\n' \
         "$total" "$GREEN" "$ok_count" "$RESET" "$RED" "$fail_count" "$RESET"
 
+    printf '\n  %sСписок перевірок:%s\n' "$BOLD" "$RESET"
+    for i in "${!check_statuses[@]}"; do
+        if [[ "${check_statuses[$i]}" == "OK" ]]; then
+            printf '    %s[ OK ]%s %s\n' "$GREEN" "$RESET" "${check_labels[$i]}"
+        else
+            printf '    %s[FAIL]%s %s\n' "$RED" "$RESET" "${check_labels[$i]}"
+        fi
+    done
+
+    printf '\n'
     if (( fail_count == 0 )); then
         printf "  %sУсі обов'язкові перевірки пройдено.%s\n" "$GREEN" "$RESET"
     else
@@ -329,9 +350,10 @@ main() {
     detect_platform
 
     printf '%s%sДіагностика мережі%s\n' "$BOLD" "$BLUE" "$RESET"
-    printf 'Хост      : %s\n' "$(hostname)"
-    printf 'Платформа : %s\n' "$PLATFORM_NAME"
-    printf 'Дата      : %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf 'Хост       : %s\n' "$(hostname)"
+    printf 'Користувач : %s\n' "$(id -un)"
+    printf 'Платформа  : %s\n' "$PLATFORM_NAME"
+    printf 'Дата       : %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 
     # Кожна функція відповідає за одну обов'язкову частину домашнього завдання.
     check_interfaces
