@@ -264,6 +264,15 @@ ssh_recommendation() {
     esac
 }
 
+ssh_access_recommendation() {
+    printf '%s\n' \
+        'Не всі файли SSH-конфігурації доступні поточному користувачу.' \
+        'Повторіть повний аудит із правами root:' \
+        'CMD: sudo ./cis_checklist.sh' \
+        'Або перевірте лише ефективне значення SSH:' \
+        "CMD: sudo sshd -T | grep '^permitrootlogin'"
+}
+
 updates_recommendation() {
     case "$PLATFORM" in
         macos)
@@ -530,22 +539,43 @@ check_firewall() {
 check_ssh_root_login() {
     local value=""
     local file
+    local effective_config=0
+    local unreadable_config=0
     local -a ssh_files=()
 
     section "3. Вхід root через SSH"
 
     # sshd -T показує ефективну конфігурацію і точніше за ручний grep.
     if have sshd; then
-        value=$(sshd -T 2>/dev/null | \
-            awk '$1 == "permitrootlogin" { print $2; exit }' || true)
+        if value=$(sshd -T 2>/dev/null | \
+            awk '$1 == "permitrootlogin" { print $2; exit }') && \
+            [[ -n "$value" ]]; then
+            effective_config=1
+        fi
     fi
 
     # Якщо sshd -T недоступний, читаємо конфігураційні файли напряму.
-    if [[ -z "$value" ]]; then
-        [[ -r /etc/ssh/sshd_config ]] && ssh_files+=(/etc/ssh/sshd_config)
+    if (( effective_config == 0 )); then
+        if [[ -e /etc/ssh/sshd_config ]]; then
+            if [[ -r /etc/ssh/sshd_config ]]; then
+                ssh_files+=(/etc/ssh/sshd_config)
+            else
+                unreadable_config=1
+            fi
+        fi
+
+        if [[ -d /etc/ssh/sshd_config.d && ! -r /etc/ssh/sshd_config.d ]]; then
+            unreadable_config=1
+        fi
         for file in /etc/ssh/sshd_config.d/*.conf; do
-            [[ -r "$file" ]] && ssh_files+=("$file")
+            [[ -e "$file" ]] || continue
+            if [[ -r "$file" ]]; then
+                ssh_files+=("$file")
+            else
+                unreadable_config=1
+            fi
         done
+
         if (( ${#ssh_files[@]} > 0 )); then
             value=$(awk '
                 /^[[:space:]]*#/ { next }
@@ -554,7 +584,13 @@ check_ssh_root_login() {
         fi
     fi
 
-    if [[ "$value" == "no" ]]; then
+    # Якщо ефективну конфігурацію не отримано, а частина файлів закрита,
+    # робити висновок PASS або FAIL не можна — це чесний SKIP.
+    if (( effective_config == 0 && unreadable_config > 0 )); then
+        result SKIP "SSH: PermitRootLogin" \
+            "частина SSH-конфігурації недоступна; потрібен sudo" \
+            "$(ssh_access_recommendation)"
+    elif [[ "$value" == "no" ]]; then
         result PASS "SSH: PermitRootLogin" "no — вхід root заборонено"
     elif [[ -n "$value" ]]; then
         result FAIL "SSH: PermitRootLogin" "$value (має бути no)" \
